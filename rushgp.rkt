@@ -1211,6 +1211,7 @@ HISTORY:
   
   (main-loop 0 start-population historical-total-errors))
 
+;; evolve a function f(x) = x^2, using the whole instruction set
 (: example1 (-> (U Individual Void)))
 (define (example1) 
   (rushgp (config [Error-Function
@@ -1222,7 +1223,7 @@ HISTORY:
                             (exact->inexact (abs (- top-int (* input input))))]
                            [_ 1000.0])))])))
 
-
+;; evolve a function f(x) = x^2, using only integer instructions
 (: example2 (-> (U Individual Void)))
 (define (example2) 
   (rushgp (config [Error-Function
@@ -1238,6 +1239,8 @@ HISTORY:
                              (list (λ () (random 100)) 
                                    (λ () (exact->inexact (random)))))])))
 
+;; evolve a function f(x) = x!, using integer, exec, boolean instructions, 
+;; and an extra input instruction, auxiliary.in
 (: example3 (-> (U Individual Void)))
 (define (example3)
   (define-instruction auxiliary IN 

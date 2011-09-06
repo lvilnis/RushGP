@@ -82,7 +82,8 @@ HISTORY:
 (define-predicate Program-Sequence? (Listof Program))
 (define-predicate Program? Program)
 (define-predicate Instruction? Instruction)
-
+(define-predicate Exact-Positive-Integer? Exact-Positive-Integer)
+ 
 ;; pushgp parameters
 
 (: max-number-magnitude Integer)
@@ -110,6 +111,22 @@ HISTORY:
     ((_ args ...)
      (plambda: args ...))))
 
+(: inexact-real->float (Inexact-Real -> Float))
+(define (inexact-real->float ir)
+  (match ir
+    [(? Float? flt) flt]
+    [_ (error "Inexact real isn't float?")]))
+
+(: sum-floats ((Listof Float) -> Float))
+(define (sum-floats flts)
+  (foldl (λ: ([el : Float] [acc : Float]) (+ el acc)) (ann 0.0 Float) flts))
+
+(: rand-int (Integer -> Integer))
+(define (rand-int seed)
+  (cond
+    [(>= seed 1) (random seed)]
+    [else 0]))
+
 (: copy-tree (Program -> Program))
 (define (copy-tree tree)
   (match tree
@@ -123,7 +140,7 @@ HISTORY:
         [(< flt (- max-number-magnitude)) (exact->inexact (- max-number-magnitude))]
         [(and (< flt min-number-magnitude)
               (> flt (- min-number-magnitude)))
-         0.0]
+         (ann 0.0 Float)]
         [else flt]))
 
 (: count-points (Program -> Integer))
@@ -399,14 +416,14 @@ HISTORY:
   (λ: ([ps : ProgramState])
     (match (ProgramState-Boolean ps)
       [(list-rest a rest)
-       (define flt (if a 1.0 0.0))
+       (define flt (if a 1.0 (ann 0.0 Float)))
        (with-stacks ps [Float (cons flt (ProgramState-Float ps))] [Boolean rest])]
       [_ ps])))
 
 (define-instruction integer FROMBOOLEAN 
   (λ: ([ps : ProgramState])
     (match (ProgramState-Boolean ps)
-      [(list-rest a rest)
+      [(cons a rest)
        (define int (if a 1 0))
        (with-stacks ps [Integer (cons int (ProgramState-Integer ps))] [Boolean rest])]
       [_ ps])))
@@ -432,7 +449,7 @@ HISTORY:
 (: bool-binop ((Boolean Boolean -> Boolean) -> (ProgramState -> ProgramState)))
 (define ((bool-binop op) ps) 
   (match (ProgramState-Boolean ps)
-    [(list-rest a b rest) (with-stacks ps [Boolean (cons (op a b) rest)])]
+    [`(,a ,b . ,rest) (with-stacks ps [Boolean (cons (op a b) rest)])]
     [_ ps]))
 
 (: bool-unop ((Boolean -> Boolean) -> (ProgramState -> ProgramState)))
@@ -448,7 +465,7 @@ HISTORY:
 (define-instruction boolean FROMFLOAT 
   (λ: ([ps : ProgramState])
     (match (ProgramState-Float ps)
-      [(list-rest flt rest)
+      [(cons flt rest)
        (define bool (= 0.0 flt))
        (with-stacks ps [Boolean (cons bool (ProgramState-Boolean ps))] [Float rest])]
       [_ ps])))
@@ -456,7 +473,7 @@ HISTORY:
 (define-instruction boolean FROMINTEGER
   (λ: ([ps : ProgramState])
     (match (ProgramState-Integer ps)
-      [(list-rest int rest)
+      [(cons int rest)
        (define bool (= 0 int))
        (with-stacks ps [Boolean (cons bool (ProgramState-Boolean ps))] [Integer rest])]
       [_ ps])))
@@ -472,35 +489,35 @@ HISTORY:
 (define-instruction code APPEND
   (λ: ([ps : ProgramState])
     (match (ProgramState-Code ps)
-      [(list-rest a b rest)
+      [`(,a ,b . ,rest)
        (with-stacks ps [Code (cons (append (ensure-list a) (ensure-list b)) rest)])]
       [_ ps])))
 
 (define-instruction code ATOM
   (λ: ([ps : ProgramState])
     (match (ProgramState-Code ps)
-      [(list-rest a rest)
+      [(cons a rest)
        (with-stacks ps [Code (cons (not (pair? a)) rest)])]
       [_ ps])))
 
 (define-instruction code CAR
   (λ: ([ps : ProgramState])
     (match (ProgramState-Code ps)
-      [(list-rest (cons hd tl) rest)
+      [`((,hd . ,tl) . ,rest)
        (with-stacks ps [Code (cons hd rest)])]
       [_ ps])))
 
 (define-instruction code CDR
   (λ: ([ps : ProgramState])
     (match (ProgramState-Code ps)
-      [(list-rest (app ensure-list (cons hd tl)) rest)
+      [(cons (app ensure-list (cons hd tl)) rest)
        (with-stacks ps [Code (cons tl rest)])]
       [_ ps])))
 
 (define-instruction code CONS
   (λ: ([ps : ProgramState])
     (match (ProgramState-Code ps)
-      [(list-rest (app ensure-list top-item) second-item rest)
+      [`(,(app ensure-list top-item) ,second-item . ,rest)
        (with-stacks ps [Code (cons (cons second-item top-item) rest)])]
       [_ ps])))
 
@@ -508,7 +525,7 @@ HISTORY:
   (λ: ([ps : ProgramState])
     (match (ProgramState-Code ps)
       [(cons prog rest)
-       (with-stacks ps [Exec (cons prog (cons 'code.pop (ProgramState-Exec ps)))])]
+       (with-stacks ps [Exec `(,prog code.pop . ,(ProgramState-Exec ps))])]
       [_ ps])))
 
 (define-instruction code DO*
@@ -521,7 +538,7 @@ HISTORY:
 (define-instruction code DO*RANGE
   (λ: ([ps : ProgramState])
     (match* ((ProgramState-Code ps) (ProgramState-Integer ps))
-      [((cons to-do code-rest) (list-rest destination-index current-index int-rest))
+      [((cons to-do code-rest) `(,destination-index ,current-index . ,int-rest))
        (define increment 
          (cond [(< current-index destination-index) 1]
                [(> current-index destination-index) -1]
@@ -656,16 +673,16 @@ HISTORY:
 
 (define-instruction exec IF
   (λ: ([ps : ProgramState])
-    (match (list (ProgramState-Exec ps) (ProgramState-Boolean ps))
-      [(list (list-rest fst snd exec-rest) (cons cond bool-rest))
+    (match* ((ProgramState-Exec ps) (ProgramState-Boolean ps))
+      [(`(,fst ,snd . ,exec-rest) (cons cond bool-rest))
        (define to-do (if cond snd fst))
        (with-stacks ps [Exec (cons (copy-tree to-do) exec-rest)] [Boolean bool-rest])]
-      [_ ps])))
+      [(_ _) ps])))
 
 (define-instruction code LENGTH
   (λ: ([ps : ProgramState])
     (match (ProgramState-Code ps)
-      [(list-rest (app ensure-list first-code) code-rest)
+      [(cons (app ensure-list first-code) code-rest)
        (with-stacks ps [Integer (cons (length first-code) (ProgramState-Integer ps))] [Code code-rest])]
       [_ ps])))
 
@@ -673,7 +690,7 @@ HISTORY:
   (λ: ([ps : ProgramState])
     (match (ProgramState-Code ps)
       [(list-rest top-item second-item code-rest)
-       (with-stacks ps [Code (cons `(,second-item ,top-item) code-rest)])]
+       (with-stacks ps [Code `((,second-item ,top-item) . ,code-rest)])]
       [_ ps])))
 
 (define-instruction code NOOP (λ (ps) ps))
@@ -682,7 +699,7 @@ HISTORY:
 (define-instruction code MEMBER
   (λ: ([ps : ProgramState]) 
     (match (ProgramState-Code ps)
-      [(list-rest top-item second-item code-rest)
+      [`(,top-item ,second-item . ,code-rest)
        (define new-bool-stack
          (cons (not (not (member second-item (ensure-list top-item)))) (ProgramState-Boolean ps)))
        (with-stacks ps [Boolean new-bool-stack] [Code code-rest])]
@@ -737,7 +754,7 @@ HISTORY:
   (λ: ([ps : ProgramState]) 
     (match (ProgramState-Exec ps)
       [(cons x exec-rest)
-       (define new-exec (append `(,x exec.y) exec-rest))
+       (define new-exec `(,x exec.y . ,exec-rest))
        (with-stacks ps [Exec new-exec])]
       [_ ps])))
 
@@ -746,7 +763,7 @@ HISTORY:
 (define-stack-instructions DUP 
   (pλ: (a) ([stack : (Stack a)]) 
     (match stack 
-      [(cons hd tl) (cons hd (cons hd tl))]
+      [(cons hd tl) `(,hd ,hd . ,tl)]
       [_ stack])))
 
 (define-stack-instructions POP 
@@ -758,13 +775,13 @@ HISTORY:
 (define-stack-instructions SWAP 
   (pλ: (a) ([stack : (Stack a)]) 
     (match stack 
-      [(list-rest a b tl) (cons b (cons a tl))]
+      [`(,a ,b . ,tl) `(,b ,a . ,tl)]
       [_ stack])))
 
 (define-stack-instructions ROT 
   (pλ: (a) ([stack : (Stack a)]) 
     (match stack 
-      [(list-rest a b c tl) (append `(,c ,a ,b) tl)]
+      [`(,a ,b ,c . ,tl) `(,c ,a ,b . ,tl)]
       [_ stack])))
 
 (define-stack-instructions FLUSH 
@@ -829,7 +846,7 @@ HISTORY:
 
 (: random-element (All (a) ((Listof a) -> a)))
 (define (random-element xs)
-  (list-ref xs (random (length xs))))
+  (list-ref xs (rand-int (length xs))))
 
 (: shuffle (All (a) ((Listof a) -> (Listof a))))
 (define (shuffle xs)
@@ -844,8 +861,8 @@ HISTORY:
   (cond
     [(or (<= max-parts 1) (<= number 1)) 
      `(,number)]
-    [else 
-     (define this-part (+ 1 (random (- number 1))))
+    [else
+     (define this-part (+ 1 (rand-int (- number 1))))
      (cons this-part (decompose (- number this-part) (- max-parts 1)))]))
 
 (: random-code-with-size (Integer (Listof Atom-Generator) -> Program))
@@ -860,7 +877,7 @@ HISTORY:
 
 (: random-code (Integer (Listof Atom-Generator) -> Program))
 (define (random-code max-points atom-generators) 
-  (random-code-with-size (+ 1 (random max-points)) atom-generators))
+  (random-code-with-size (+ 1 (rand-int max-points)) atom-generators))
 
 ;; Interpreter
 
@@ -888,8 +905,13 @@ HISTORY:
 
 (: lookup-instruction (Instruction -> (ProgramState -> ProgramState)))
 (define (lookup-instruction instr)
-  ;;(printf "Executing instruction: ~A ~A" (Instruction-Type instr) (Instruction-Name instr))
+  ;;(printf "Executing instruction: ~A" instr)
   (hash-ref instruction-table (string-downcase (symbol->string instr))))
+
+;; something is messed up with 0.0
+;; i had the following Program-Sequence fail to match: '(0 9 code.quote 0.0 code.do*range)
+;; somehow i'm getting 0.0 not matching the Instruction predicate at some point, even though if I
+;; type it out by hand (e.g. (Instruction? 0.0) and the like), it seems to work fine
 
 (: execute (ProgramState Integer (Listof Program) Boolean -> ProgramState))
 (define (execute current-state execution-count traces print)
@@ -901,9 +923,9 @@ HISTORY:
          [(? Instruction? instr)
           (with-handlers 
               ([(λ (_) #t) 
-                (λ (_) 
+                (λ (a) 
                   (printf "Failed during instruction: ~A" instr)
-                  (error ""))])
+                  (error (format "~A" a)))])
             ((lookup-instruction instr) (with-stacks current-state [Exec new-exec])))]
          [(? Literal? lit)
           (define new-state (with-stacks current-state [Exec new-exec]))
@@ -912,7 +934,8 @@ HISTORY:
             [(? Float? flt) (push-float flt new-state)]
             [(? Boolean? b) (push-boolean b new-state)])]
          [(? Program-Sequence? ps)
-          (with-stacks current-state [Exec (append ps new-exec)])]))
+          (with-stacks current-state [Exec (append ps new-exec)])]
+         [0.0 (error "how come this didnt match literal predicate?")]))
      (define new-execution-count (+ 1 execution-count))
      (define new-traces (if save-traces (cons exec-top traces) traces))
      (when print
@@ -959,9 +982,9 @@ HISTORY:
   (define: (randomly-remove [program : Program]) : Program
     (for/fold ([removed-prog program])
       ([i (in-range (+ 1 (random 2)))])
-      (remove-code-at-point removed-prog (random (count-points removed-prog)))))
+      (remove-code-at-point removed-prog (rand-int (count-points removed-prog)))))
   (define: (randomly-flatten [program : Program]) : Program
-    (define point-index (random (count-points program)))
+    (define point-index (rand-int (count-points program)))
     (define point (code-at-point program point-index))
     (if (list? point) 
         (insert-code-at-point program point-index (flatten-program point))
@@ -981,11 +1004,11 @@ HISTORY:
           [4 (randomly-flatten program)]))
       (define new-errors (error-function new-program))
       (define-values (final-program final-errors)
-        (if (> (apply + new-errors) (apply + errors)) 
+        (if (> (sum-floats new-errors) (sum-floats errors)) 
             (values program errors) 
             (values new-program new-errors)))
       (values final-errors final-program)))
-  (Individual simplified-program simplified-errors (apply + simplified-errors) (apply + simplified-errors )))
+  (Individual simplified-program simplified-errors (sum-floats simplified-errors) (sum-floats simplified-errors)))
 
 (define: (get-sorter [f : (Individual -> (U Float 'undefined))]) : (Individual -> Float) 
   (λ (i) (match (f i)
@@ -1007,12 +1030,12 @@ HISTORY:
   (printf "~%Scaled: ~A" (Individual-Scaled-Error best))
   (printf "~%Size: ~A" (count-points (Individual-Program best)))
   (printf "~%~%Average total errors in population: ~A"
-          (/ (apply + (map Individual-Total-Error sorted)) (length population)))
+          (/ (sum-floats ((inst map Float Individual)  (get-sorter Individual-Total-Error) sorted)) (exact->inexact (length population))))
   (printf "~%Median total errors in population: ~A"
           (Individual-Total-Error (list-ref sorted (trunc (exact->inexact (/ (length sorted) 2))))))
   (printf "~%Average program size in population (points): ~A"
-          (/ (apply + (map (λ: ([g : Individual]) (* 1.0 (count-points (Individual-Program g)))) sorted))
-             (length population)))
+          (/ (sum-floats ((inst map Float Individual) (ann (λ: ([g : Individual]) (exact->inexact (* 1.0 (count-points (Individual-Program g))))) (Individual -> Float)) sorted))
+             (exact->inexact (length population))))
   best)
 
 (: generate-tournament-set ((Listof Individual) Integer Integer Integer -> (Listof Individual)))
@@ -1022,8 +1045,8 @@ HISTORY:
     ([i (in-range tournament-size)])
     (cons (list-ref population 
                     (if (zero? radius)
-                        (random (length population))
-                        (modulo (+ location (- (random (+ 1 (* radius 2))) radius)) (length population))))
+                        (rand-int (length population))
+                        (modulo (+ location (- (rand-int (+ 1 (* radius 2))) radius)) (length population))))
           tournament-set)))
 
 (: select ((Listof Individual) Integer Integer Integer -> Individual))
@@ -1034,12 +1057,14 @@ HISTORY:
 (: select-compensatory ((Listof Individual) Integer Integer Integer Individual -> Individual))
 (define (select-compensatory population tournament-size radius location first-parent)
   (define tournament-set (generate-tournament-set population tournament-size radius location))
-  (define key-selector (λ: ([ind : Individual]) (apply + (map * (Individual-Errors ind) (Individual-Errors first-parent)))))
-  (car ((inst sort Individual Float) tournament-set < #:key key-selector)))
+  (define key-selector (λ: ([ind : Individual]) (sum-floats (map * (Individual-Errors ind) (Individual-Errors first-parent)))))
+  (car ((inst sort Individual Float) tournament-set (ann < (Float Float -> Boolean)) #:key key-selector)))
 
 (: get-new-individual (Individual Integer Program -> Individual))
 (define (get-new-individual old-individual max-points new-program)
-  (if (> (count-points new-program) max-points) old-individual (Individual new-program '() 'undefined 'undefined)))
+  (if (> (count-points new-program) max-points) 
+      old-individual 
+      (Individual new-program '() 'undefined 'undefined)))
 
 (: mutate (Individual Integer Integer (Listof (U Program (-> Program))) -> Individual))
 (define (mutate old-individual mutation-max-points max-points atom-generators)
@@ -1047,7 +1072,7 @@ HISTORY:
                       max-points 
                       (insert-code-at-point 
                        (Individual-Program old-individual) 
-                       (random (count-points (Individual-Program old-individual)))
+                       (rand-int (count-points (Individual-Program old-individual)))
                        (random-code mutation-max-points atom-generators))))
 
 (: crossover (Individual Individual Integer -> Individual))
@@ -1056,9 +1081,9 @@ HISTORY:
                       max-points
                       (insert-code-at-point 
                        (Individual-Program parent1) 
-                       (random (count-points (Individual-Program parent1)))
+                       (rand-int (count-points (Individual-Program parent1)))
                        (code-at-point (Individual-Program parent2)
-                                      (random (count-points (Individual-Program parent2)))))))
+                                      (rand-int (count-points (Individual-Program parent2)))))))
 
 ;; configuration for a pushgp run
 
@@ -1089,7 +1114,7 @@ HISTORY:
    1000
    50
    (append (map definition->instr instructions)
-           (list (λ () (random 100)) (λ () (exact->inexact (random)))))
+           (list (λ () (ann (random 100) Integer)) (λ () (inexact-real->float (random)))))
    1001
    0.4
    20
@@ -1162,7 +1187,7 @@ HISTORY:
                 (define total-error 
                   (match* ((Individual-Total-Error i) scale-errors)
                     [((? Float? ite) #f) ite]
-                    [('undefined _) (keep-number-reasonable (apply + errors))]))
+                    [('undefined _) (keep-number-reasonable (sum-floats errors))]))
                 (Individual (Individual-Program i) errors total-error total-error))
               population))
        (define best (report population-with-errors generation error-function report-simplifications))
@@ -1234,10 +1259,10 @@ HISTORY:
                            [(cons top-int int-rest)
                             (exact->inexact (abs (- top-int (* input input))))]
                            [_ 1000.0])))]
-                    [Atom-Generators
+                    [Atom-Generators 
                      (append (registered-for-type 'integer) 
-                             (list (λ () (random 100)) 
-                                   (λ () (exact->inexact (random)))))])))
+                             (list (λ () (ann (random 100) Integer)) 
+                                   (λ () (inexact-real->float (random)))))])))
 
 ;; evolve a function f(x) = x!, using integer, exec, boolean instructions, 
 ;; and an extra input instruction, auxiliary.in
@@ -1270,6 +1295,6 @@ HISTORY:
                              (registered-for-type 'exec)
                              (registered-for-type 'boolean)
                              (list (λ () (random 100))
-                                   (λ () (exact->inexact (random)))
+                                   (λ () (inexact-real->float (random)))
                                    (λ () 'auxiliary.in)))]
                     [Max-Points 100])))

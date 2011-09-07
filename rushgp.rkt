@@ -34,7 +34,8 @@ HISTORY:
 
 8/10/2011: Started work.
 8/21/2011: First version released.
-
+9/5/2011: Cleaned up some instruction definitions, added some annotations and helpers to get RushGP building in Racket 5.1.3.
+9/6/2011: Made sure RushGP builds in both Racket 5.1.2 and 5.1.3 for comparison, small type-based optimizations.
 |#
 
 #lang typed/racket
@@ -111,9 +112,9 @@ HISTORY:
     ((_ args ...)
      (plambda: args ...))))
 
-(: inexact-real->float (Inexact-Real -> Float))
-(define (inexact-real->float ir)
-  (match ir
+(: real->float ((U Real Inexact-Real) -> Float))
+(define (real->float ir)
+  (match (exact->inexact ir)
     [(? Float? flt) flt]
     [_ (error "Inexact real isn't float?")]))
 
@@ -963,7 +964,10 @@ HISTORY:
     (state-pretty-print state-with-exec))
   (define state-evaluated (execute state-with-exec 0 '() print))
   (define state-with-popped (if top-level-pop-code 
-                                (with-stacks state-evaluated [Code (cdr (ProgramState-Code state-evaluated))]) 
+                                (with-stacks state-evaluated 
+                                             [Code (match (ProgramState-Code state-evaluated)
+                                                     [(cons hd tl) tl]
+                                                     ['() '()])]) 
                                 state-evaluated))
   state-with-popped)
 
@@ -1052,13 +1056,19 @@ HISTORY:
 (: select ((Listof Individual) Integer Integer Integer -> Individual))
 (define (select population tournament-size radius location)
   (define tournament-set (generate-tournament-set population tournament-size radius location))
-  (car ((inst sort Individual Float) tournament-set < #:key (get-sorter Individual-Scaled-Error))))
+  (define sorted-list ((inst sort Individual Float) tournament-set < #:key (get-sorter Individual-Scaled-Error)))
+  (match sorted-list
+    [(cons hd _) hd]
+    ['() (error "Expected nonempty list in select!")]))
 
 (: select-compensatory ((Listof Individual) Integer Integer Integer Individual -> Individual))
 (define (select-compensatory population tournament-size radius location first-parent)
   (define tournament-set (generate-tournament-set population tournament-size radius location))
   (define key-selector (λ: ([ind : Individual]) (sum-floats (map * (Individual-Errors ind) (Individual-Errors first-parent)))))
-  (car ((inst sort Individual Float) tournament-set (ann < (Float Float -> Boolean)) #:key key-selector)))
+  (define sorted-list ((inst sort Individual Float) tournament-set (ann < (Float Float -> Boolean)) #:key key-selector))
+  (match sorted-list
+    [(cons hd _) hd]
+    ['() (error "Expected nonempty list in select-compensatory!")]))
 
 (: get-new-individual (Individual Integer Program -> Individual))
 (define (get-new-individual old-individual max-points new-program)
@@ -1114,7 +1124,7 @@ HISTORY:
    1000
    50
    (append (map definition->instr instructions)
-           (list (λ () (ann (random 100) Integer)) (λ () (inexact-real->float (random)))))
+           (list (λ () (ann (random 100) Integer)) (λ () (real->float (random)))))
    1001
    0.4
    20
@@ -1262,7 +1272,7 @@ HISTORY:
                     [Atom-Generators 
                      (append (registered-for-type 'integer) 
                              (list (λ () (ann (random 100) Integer)) 
-                                   (λ () (inexact-real->float (random)))))])))
+                                   (λ () (real->float (random)))))])))
 
 ;; evolve a function f(x) = x!, using integer, exec, boolean instructions, 
 ;; and an extra input instruction, auxiliary.in
@@ -1295,6 +1305,6 @@ HISTORY:
                              (registered-for-type 'exec)
                              (registered-for-type 'boolean)
                              (list (λ () (random 100))
-                                   (λ () (inexact-real->float (random)))
+                                   (λ () (real->float (random)))
                                    (λ () 'auxiliary.in)))]
                     [Max-Points 100])))

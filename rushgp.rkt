@@ -909,11 +909,6 @@ HISTORY:
   ;;(printf "Executing instruction: ~A" instr)
   (hash-ref instruction-table (string-downcase (symbol->string instr))))
 
-;; something is messed up with 0.0
-;; i had the following Program-Sequence fail to match: '(0 9 code.quote 0.0 code.do*range)
-;; somehow i'm getting 0.0 not matching the Instruction predicate at some point, even though if I
-;; type it out by hand (e.g. (Instruction? 0.0) and the like), it seems to work fine
-
 (: execute (ProgramState Integer (Listof Program) Boolean -> ProgramState))
 (define (execute current-state execution-count traces print)
   (match (ProgramState-Exec current-state)

@@ -936,7 +936,7 @@ HISTORY:
             [(? Boolean? b) (push-boolean b new-state)])]
          [(? Program-Sequence? ps)
           (with-stacks current-state [Exec (append ps new-exec)])]
-         [0.0 (error "how come this didnt match literal predicate?")]))
+         [(and x 0.0) (error (format "how come this didnt match literal predicate? Float? ~A Program? ~A Literal? ~A" (Float? x) (Program? x) (Literal? x)))]))
      (define new-execution-count (+ 1 execution-count))
      (define new-traces (if save-traces (cons exec-top traces) traces))
      (when print

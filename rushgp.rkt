@@ -1052,6 +1052,7 @@ HISTORY:
 (: select ((Listof Individual) Integer Integer Integer -> Individual))
 (define (select population tournament-size radius location)
   (define tournament-set (generate-tournament-set population tournament-size radius location))
+  ;; it's kind of weird that scaled-error is used even if scale-errors is false, and its just a copy of total-error
   (define sorted-list ((inst sort Individual Float) tournament-set < #:key (get-sorter Individual-Scaled-Error)))
   (match sorted-list
     [(cons hd _) hd]
@@ -1192,8 +1193,8 @@ HISTORY:
                                  ['() (error-function (Individual-Program i))]))
                 (define total-error 
                   (match* ((Individual-Total-Error i) scale-errors)
-                    [((? Float? ite) #f) ite]
-                    [('undefined _) (keep-number-reasonable (sum-floats errors))]))
+                    [((? Float? ite) #f) ite] ;; this is copied from schush, I'm not exactly sure on the logic...
+                    [(_ _) (keep-number-reasonable (sum-floats errors))]))
                 (Individual (Individual-Program i) errors total-error total-error))
               population))
        (: get-population-with-scaled-errors ((Listof Individual) -> (Listof Individual)))
@@ -1329,21 +1330,41 @@ HISTORY:
                                    (λ () 'auxiliary.in)))]
                     [Max-Points 100])))
 
-;; evolve a function f(x) = x^2, using only integer instructions, scaling errors
+
+;; evolve a function f(x) = x!, using integer, exec, boolean instructions, 
+;; and an extra input instruction, auxiliary.in - with scaling errors (this might
+;; help since the higher numbers are harder to get right)
 (: example4 (-> (U Individual Void)))
-(define (example4) 
+(define (example4)
+  (define-instruction auxiliary IN 
+    (λ: ([state : ProgramState])
+      (match (ProgramState-Auxiliary state)
+        [(cons (? Integer? n) _) 
+         (push-integer n state)]
+        [_ state])))
+  (: factorial (Integer -> Integer))
+  (define (factorial n)
+    (if (< n 2)
+        1
+        (* n (factorial (- n 1)))))
   (rushgp (config [Error-Function
                      (λ: ([program : Program])
-                       (for/list: : (Listof Float) ((input (in-range 10.0)))
-                         (define state (push-integer input (make-push-state)))
+                       (for/list: : (Listof Float) ((input (in-range 1 6)))
+                         (define state
+                           (with-stacks (make-push-state) 
+                                        [Integer `(,input)] 
+                                        [Auxiliary `(,input)]))
                          (match (ProgramState-Integer (run-rush program state false))
                            [(cons top-int int-rest)
-                            (exact->inexact (abs (- top-int (* input input))))]
-                           [_ 1000.0])))]
-                    [Atom-Generators 
+                            (exact->inexact (abs (- top-int (factorial input))))]
+                           [_ 1000000000.0])))]
+                    [Atom-Generators
                      (append (registered-for-type 'integer) 
-                             (list (λ () (ann (random 100) Integer)) 
-                                   (λ () (real->float (random)))))]
+                             (registered-for-type 'exec)
+                             (registered-for-type 'boolean)
+                             (list (λ () (random 100))
+                                   (λ () (real->float (random)))
+                                   (λ () 'auxiliary.in)))]
+                    [Max-Points 100]
                     [Scale-Errors #t]
                     [Error-Threshold 0.0])))
-

@@ -932,8 +932,7 @@ HISTORY:
             [(? Float? flt) (push-float flt new-state)]
             [(? Boolean? b) (push-boolean b new-state)])]
          [(? Program-Sequence? ps)
-          (with-stacks current-state [Exec (append ps new-exec)])]
-         [(and x 0.0) (error (format "how come this didnt match literal predicate? Float? ~A Program? ~A Literal? ~A" (Float? x) (Program? x) (Literal? x)))]))
+          (with-stacks current-state [Exec (append ps new-exec)])]))
      (define new-execution-count (+ 1 execution-count))
      (define new-traces (if save-traces (cons exec-top traces) traces))
      (when print
@@ -1096,7 +1095,7 @@ HISTORY:
 
 (struct: RushGPConfig
   ([Error-Function : (Program -> (Listof Float))]
-   [Error-Threshold : Integer]
+   [Error-Threshold : Float]
    [Population-Size : Integer]
    [Max-Points : Integer]
    [Atom-Generators : (Listof Atom-Generator)]
@@ -1117,7 +1116,7 @@ HISTORY:
 (define (get-default-config)
   (RushGPConfig
    (λ (_) (error "Need to specify an error function!"))
-   0
+   0.0
    1000
    50
    (append (map definition->instr instructions)
@@ -1225,7 +1224,7 @@ HISTORY:
        (define new-historical-errors (append historical-total-errors (filter Float? `(,(Individual-Total-Error best)))))
        (define ittl-best (Individual-Total-Error best))
        (cond
-         [(and (Float? ittl-best) (<=  ittl-best error-threshold))
+         [(and (Float? ittl-best) (<= ittl-best error-threshold))
           (printf "~%~%SUCCESS at generation ~A~%Successful program: ~A~%Errors: ~A~%Total error: ~A~%Size: ~A~%~%"
                   generation
                   (prog->string (Individual-Program best))

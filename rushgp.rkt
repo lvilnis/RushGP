@@ -250,6 +250,10 @@ HISTORY:
     [1 `(,item)]
     [_ (cons item (repeat item (- num-times 1)))]))
 
+(: symbol-downcase (Symbol -> Symbol))
+(define (symbol-downcase sym)
+  (string->symbol (string-downcase (symbol->string sym))))
+
 ;; Macros and functions for registering push instructions and related fancy business
 
 (: instructions (Listof Instruction-Definition))
@@ -277,14 +281,13 @@ HISTORY:
 
 (: registered-for-type (PushType -> (Listof Instruction)))
 (define (registered-for-type pt)
-  (map (λ: ([id : Instruction-Definition]) (definition->instr id))
-       (filter (λ: ([id : Instruction-Definition]) (equal? pt (Instruction-Definition-Type id)))
-               instructions)))
+  (define has-same-type (λ: ([id : Instruction-Definition]) (equal? pt (Instruction-Definition-Type id))))
+  (map definition->instr (filter has-same-type instructions)))
 
 (define-syntax define-instruction
   (syntax-rules ()
     ((_ type instruction definition)
-     (register (Instruction-Definition 'type 'instruction definition) definition))))
+     (register (Instruction-Definition 'type (symbol-downcase 'instruction) definition) definition))))
 
 (define-syntax with-stacks
   (syntax-rules ()
@@ -299,7 +302,6 @@ HISTORY:
    (Instruction-Definition 'float sym (λ (ps) (with-stacks ps [Float (definition (ProgramState-Float ps))])))
    (Instruction-Definition 'code sym (λ (ps) (with-stacks ps [Code (definition (ProgramState-Code ps))])))
    (Instruction-Definition 'boolean sym (λ (ps) (with-stacks ps [Boolean (definition (ProgramState-Boolean ps))])))))
-
 
 (: define-stack-instructions-function (Symbol (All (a) ((Stack a) -> (Stack a))) -> Void))
 (define (define-stack-instructions-function sym definition)
@@ -1184,7 +1186,7 @@ HISTORY:
     (cond 
       [(<= generation max-generations)
        (printf "~%Computing errors...")
-       (define population-with-errors 
+       (define population-with-unscaled-errors 
          (map (λ: ([i : Individual])
                 (define errors (match (Individual-Errors i)
                                  [(cons _ _) (Individual-Errors i)]
@@ -1195,11 +1197,35 @@ HISTORY:
                     [('undefined _) (keep-number-reasonable (sum-floats errors))]))
                 (Individual (Individual-Program i) errors total-error total-error))
               population))
+       (: get-population-with-scaled-errors ((Listof Individual) -> (Listof Individual)))
+       (define (get-population-with-scaled-errors base-pop)
+         (printf "~%Scaling errors...")
+         (define num-cases (length (Individual-Errors (car base-pop))))
+         (define per-case-threshold (/ error-threshold num-cases))
+         (define: cumulative-successes : (Listof Integer)
+           (for/list: ([error-index (in-range 0 num-cases)])   
+             (for/fold: ([total-successes-for-index : Integer 0])
+               ([individual base-pop]
+                #:when (<= (list-ref (Individual-Errors individual) error-index) 
+                           per-case-threshold))
+               (+ total-successes-for-index 1))))
+         (for/list: ([individual base-pop])
+           (define sum-scaled-errors 
+             (for/fold: ([sum-scaled-errors : Float 0.0])
+               ([error : Float (Individual-Errors individual)]
+                [error-index (in-range 0 num-cases)])
+               (define: scaled-error : Float (exact->inexact (/ error (+ 1 (list-ref cumulative-successes error-index)))))
+               (+ scaled-error sum-scaled-errors)))
+           (struct-copy Individual individual [Scaled-Error sum-scaled-errors])))
+       (define population-with-errors
+         (if get-population-with-scaled-errors
+             (get-population-with-scaled-errors population-with-unscaled-errors)
+             population-with-unscaled-errors))
        (define best (report population-with-errors generation error-function report-simplifications))
        (define new-historical-errors (append historical-total-errors (filter Float? `(,(Individual-Total-Error best)))))
        (define ittl-best (Individual-Total-Error best))
-       (match (and (Float? ittl-best) (<=  ittl-best error-threshold))
-         [#t
+       (cond
+         [(and (Float? ittl-best) (<=  ittl-best error-threshold))
           (printf "~%~%SUCCESS at generation ~A~%Successful program: ~A~%Errors: ~A~%Total error: ~A~%Size: ~A~%~%"
                   generation
                   (prog->string (Individual-Program best))
@@ -1207,7 +1233,7 @@ HISTORY:
                   (Individual-Total-Error best)
                   (count-points (Individual-Program best)))
           (auto-simplify (Individual-Program best) error-function report-simplifications #f 1000)]
-         [#f 
+         [else
           (printf "~%Producing offspring...")
           (: new-generation (Listof Individual))
           (define new-generation 
@@ -1280,14 +1306,14 @@ HISTORY:
          (push-integer n state)]
         [_ state])))
   (: factorial (Integer -> Integer))
-  (define (factorial n) 
+  (define (factorial n)
     (if (< n 2)
         1
         (* n (factorial (- n 1)))))
   (rushgp (config [Error-Function
                      (λ: ([program : Program])
-                       (for/list: : (Listof Float) ((input (in-range 1 6))) 
-                         (define state 
+                       (for/list: : (Listof Float) ((input (in-range 1 6)))
+                         (define state
                            (with-stacks (make-push-state) 
                                         [Integer `(,input)] 
                                         [Auxiliary `(,input)]))
@@ -1303,3 +1329,22 @@ HISTORY:
                                    (λ () (real->float (random)))
                                    (λ () 'auxiliary.in)))]
                     [Max-Points 100])))
+
+;; evolve a function f(x) = x^2, using only integer instructions, scaling errors
+(: example4 (-> (U Individual Void)))
+(define (example4) 
+  (rushgp (config [Error-Function
+                     (λ: ([program : Program])
+                       (for/list: : (Listof Float) ((input (in-range 10.0)))
+                         (define state (push-integer input (make-push-state)))
+                         (match (ProgramState-Integer (run-rush program state false))
+                           [(cons top-int int-rest)
+                            (exact->inexact (abs (- top-int (* input input))))]
+                           [_ 1000.0])))]
+                    [Atom-Generators 
+                     (append (registered-for-type 'integer) 
+                             (list (λ () (ann (random 100) Integer)) 
+                                   (λ () (real->float (random)))))]
+                    [Scale-Errors #t]
+                    [Error-Threshold 0.0])))
+

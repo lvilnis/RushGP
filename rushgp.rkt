@@ -8,7 +8,7 @@ LICENSE:
 
 Copyright (c) 2011 Luke Vilnis
 
-This work is based on (versions as of 8/21/2011):
+This work is based on (versions as of 10/2/2011):
 
 Schush/SchushGP (http://hampshire.edu/lspector/schush.ss), copyright (c) 2009, 2010 Lee Spector 
 Clojush/ClojushGP (https://github.com/lspector/Clojush), copyright (c) 2010, 2011 Lee Spector
@@ -36,6 +36,7 @@ HISTORY:
 8/21/2011: First version released.
 9/5/2011: Cleaned up some instruction definitions, added some annotations and helpers to get RushGP building in Racket 5.1.3.
 9/6/2011: Made sure RushGP builds in both Racket 5.1.2 and 5.1.3 for comparison, small type-based optimizations.
+10/2/2011: Added error-scaling, small cleanup/fixes.
 |#
 
 #lang typed/racket
